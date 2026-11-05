@@ -55,6 +55,8 @@ final class TestApp
             $repository->set($key, $value);
         }
         $app->instance('config', $repository);
+        // A host always has a request; tests replace it with submission().
+        $app->instance('request', \Illuminate\Http\Request::create('https://forms.example.test/'));
 
         foreach ([FilesystemServiceProvider::class, EncryptionServiceProvider::class, CacheServiceProvider::class,
             TranslationServiceProvider::class, ValidationServiceProvider::class] as $provider) {

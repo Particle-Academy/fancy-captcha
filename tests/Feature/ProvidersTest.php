@@ -13,7 +13,7 @@ const ENDPOINTS = [
     'hcaptcha' => 'https://api.hcaptcha.com/siteverify',
 ];
 
-function fixture(string $name, array $merge = []): array
+function providerFixture(string $name, array $merge = []): array
 {
     return [...json_decode((string) file_get_contents(__DIR__.'/../Fixtures/'.$name.'.json'), true, 16, JSON_THROW_ON_ERROR), ...$merge];
 }
@@ -30,13 +30,31 @@ function tokenInput(array $extra = []): array
     return humanInput([Fields::TOKEN => 'XXXX.DUMMY.TOKEN.XXXX', ...$extra]);
 }
 
+/**
+ * A broken provider, by name. Datasets name the failure rather than holding a
+ * closure, because Pest INVOKES closures it finds in a dataset.
+ */
+function brokenProvider(string $kind, string $token = ''): Closure
+{
+    return match ($kind) {
+        'connection refused' => fn () => throw new ConnectionException('cURL error 7: Failed to connect, response='.$token),
+        'timeout' => fn () => throw new ConnectionException('cURL error 28: Operation timed out after 3001 milliseconds'),
+        'any other exception' => fn () => throw new RuntimeException('boom '.$token),
+        'http 500' => fn () => Http::response(['success' => true, 'echo' => $token], 500),
+        'http 302' => fn () => Http::response(['success' => true], 302, ['Location' => 'https://evil.example/']),
+        'not json' => fn () => Http::response('<html>Bad gateway</html>', 200),
+        'json scalar' => fn () => Http::response('true', 200),
+        'huge body' => fn () => Http::response('{"success":true,"pad":"'.str_repeat('a', 20000).'"}', 200),
+    };
+}
+
 it('passes a valid provider response and sends the documented form fields', function (string $driver, string $fixture, array $config): void {
     captchaApp(providerConfig($driver, $config));
-    fakeProvider($driver, fixture($fixture));
+    fakeProvider($driver, providerFixture($fixture));
 
     $verdict = captcha()->verify(submission(tokenInput()), 'signup');
 
-    expect($verdict->passed)->toBeTrue()->and($verdict->driver)->toBe($driver);
+    expect($verdict->reason)->toBeNull()->and($verdict->passed)->toBeTrue()->and($verdict->driver)->toBe($driver);
     Http::assertSent(fn (ClientRequest $r): bool => $r->url() === ENDPOINTS[$driver]
         && $r->method() === 'POST'
         && $r->isForm()
@@ -52,7 +70,7 @@ it('passes a valid provider response and sends the documented form fields', func
 
 it('sends the site key to hCaptcha, as hCaptcha recommends', function (): void {
     captchaApp(providerConfig('hcaptcha'));
-    fakeProvider('hcaptcha', fixture('hcaptcha-success'));
+    fakeProvider('hcaptcha', providerFixture('hcaptcha-success'));
 
     captcha()->verify(submission(tokenInput()));
 
@@ -61,7 +79,7 @@ it('sends the site key to hCaptcha, as hCaptcha recommends', function (): void {
 
 it('reads the provider widget\'s own field when the shared one is absent', function (string $driver, string $native, string $fixture): void {
     captchaApp(providerConfig($driver));
-    fakeProvider($driver, fixture($fixture));
+    fakeProvider($driver, providerFixture($fixture));
 
     expect(captcha()->verify(submission(humanInput([$native => 'NATIVE-token'])))->passed)->toBeTrue();
     Http::assertSent(fn (ClientRequest $r): bool => $r['response'] === 'NATIVE-token');
@@ -73,7 +91,7 @@ it('reads the provider widget\'s own field when the shared one is absent', funct
 
 it('refuses what the provider refuses', function (string $driver, string $fixture): void {
     captchaApp(providerConfig($driver));
-    fakeProvider($driver, fixture($fixture));
+    fakeProvider($driver, providerFixture($fixture));
 
     $verdict = captcha()->verify(submission(tokenInput()));
 
@@ -86,27 +104,38 @@ it('refuses what the provider refuses', function (string $driver, string $fixtur
 
 it('only accepts boolean true as success', function (mixed $success): void {
     captchaApp(providerConfig('turnstile'));
-    fakeProvider('turnstile', fixture('turnstile-success', ['success' => $success]));
+    fakeProvider('turnstile', providerFixture('turnstile-success', ['success' => $success]));
 
     expect(captcha()->verify(submission(tokenInput()))->passed)->toBeFalse();
 })->with([['true'], [1], [null], [[true]]]);
 
-it('FAILS CLOSED on a network error, a timeout, a server error or a garbled body', function (Closure|array $response, int $status, string $reason): void {
+it('FAILS CLOSED on a network error, a timeout, a server error or a garbled body', function (string $kind, string $reason): void {
     captchaApp(providerConfig('turnstile'));
-    fakeProvider('turnstile', $response, $status);
+    fakeProvider('turnstile', brokenProvider($kind));
 
     $verdict = captcha()->verify(submission(tokenInput()));
 
     expect($verdict->passed)->toBeFalse()->and($verdict->reason)->toBe($reason);
 })->with([
-    'connection refused' => [fn () => throw new ConnectionException('cURL error 7: Failed to connect'), 200, 'provider_unreachable'],
-    'timeout' => [fn () => throw new ConnectionException('cURL error 28: Operation timed out after 3001 milliseconds'), 200, 'provider_unreachable'],
-    'any other exception' => [fn () => throw new RuntimeException('boom'), 200, 'provider_unreachable'],
-    'http 500' => [['success' => true], 500, 'provider_http_error'],
-    'http 302' => [['success' => true], 302, 'provider_http_error'],
-    'not json' => [fn () => Http::response('<html>Bad gateway</html>', 200), 200, 'provider_bad_response'],
-    'json scalar' => [fn () => Http::response('true', 200), 200, 'provider_bad_response'],
+    ['connection refused', 'provider_unreachable'],
+    ['timeout', 'provider_unreachable'],
+    ['any other exception', 'provider_unreachable'],
+    ['http 500', 'provider_http_error'],
+    ['http 302', 'provider_http_error'],
+    ['not json', 'provider_bad_response'],
+    ['json scalar', 'provider_bad_response'],
+    ['huge body', 'provider_bad_response'],
 ]);
+
+it('keeps every default when a host config sets only the keys', function (): void {
+    // TestApp sets these BEFORE the provider registers, exactly like a host's
+    // partial config/fancy-captcha.php. A shallow merge would drop `endpoint`.
+    captchaApp(providerConfig('turnstile'));
+
+    expect(config('fancy-captcha.providers.turnstile.endpoint'))->toBe(ENDPOINTS['turnstile'])
+        ->and(config('fancy-captcha.providers.turnstile.max_token_length'))->toBe(2048)
+        ->and(config('fancy-captcha.builtin.min_seconds'))->toBe(3);
+});
 
 it('sends the configured short timeout', function (): void {
     captchaApp(providerConfig('turnstile', ['fancy-captcha.timeout' => 2.5]));
@@ -115,7 +144,7 @@ it('sends the configured short timeout', function (): void {
     Http::fake(function (ClientRequest $request, array $options) use (&$seen) {
         $seen = $options['timeout'] ?? null;
 
-        return Http::response(fixture('turnstile-success'));
+        return Http::response(providerFixture('turnstile-success'));
     });
 
     captcha()->verify(submission(tokenInput()));
@@ -125,7 +154,7 @@ it('sends the configured short timeout', function (): void {
 
 it('checks the hostname the provider reports', function (array $config, string $hostname, bool $passes): void {
     captchaApp(providerConfig('turnstile', $config));
-    fakeProvider('turnstile', fixture('turnstile-success', ['hostname' => $hostname]));
+    fakeProvider('turnstile', providerFixture('turnstile-success', ['hostname' => $hostname]));
 
     $verdict = captcha()->verify(submission(tokenInput()));
 
@@ -143,7 +172,7 @@ it('checks the hostname the provider reports', function (array $config, string $
 
 it('checks the action the provider reports', function (?string $expected, array $merge, bool $passes): void {
     captchaApp(providerConfig('turnstile'));
-    fakeProvider('turnstile', fixture('turnstile-success', $merge));
+    fakeProvider('turnstile', providerFixture('turnstile-success', $merge));
 
     expect(captcha()->verify(submission(tokenInput()), $expected)->passed)->toBe($passes);
 })->with([
@@ -155,7 +184,7 @@ it('checks the action the provider reports', function (?string $expected, array 
 
 it('enforces the reCAPTCHA v3 score threshold and expected action', function (array $merge, ?string $action, bool $passes, ?string $reason): void {
     captchaApp(providerConfig('recaptcha', ['fancy-captcha.providers.recaptcha.version' => 'v3', 'fancy-captcha.providers.recaptcha.score_threshold' => 0.5]));
-    fakeProvider('recaptcha', fixture('recaptcha-v3-success', $merge));
+    fakeProvider('recaptcha', providerFixture('recaptcha-v3-success', $merge));
 
     $verdict = captcha()->verify(submission(tokenInput()), $action);
 
@@ -172,7 +201,7 @@ it('enforces the reCAPTCHA v3 score threshold and expected action', function (ar
 
 it('refuses a missing or malformed token without calling the provider', function (mixed $token, string $reason): void {
     captchaApp(providerConfig('turnstile'));
-    fakeProvider('turnstile', fixture('turnstile-success'));
+    fakeProvider('turnstile', providerFixture('turnstile-success'));
 
     $verdict = captcha()->verify(submission(humanInput([Fields::TOKEN => $token])));
 
@@ -190,7 +219,7 @@ it('refuses a missing or malformed token without calling the provider', function
 
 it('runs the built-in honeypot and timing first, and skips the provider call when they fail', function (): void {
     captchaApp(providerConfig('turnstile'));
-    fakeProvider('turnstile', fixture('turnstile-success'));
+    fakeProvider('turnstile', providerFixture('turnstile-success'));
 
     $verdict = captcha()->verify(submission(tokenInput([Fields::HONEYPOT => 'bot'])));
 

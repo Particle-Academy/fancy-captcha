@@ -35,10 +35,13 @@ it('does not log the IP address unless the host asks for it', function (): void 
     expect(allLogText())->toContain('203.0.113.7');
 });
 
-it('never logs a token value, on any refusal path', function (Closure|array $response, int $status): void {
+it('never logs a token value, on any refusal path', function (?array $response, int $status): void {
     captchaApp(providerConfig('turnstile'));
     Http::preventStrayRequests();
-    Http::fake(['https://challenges.cloudflare.com/*' => $response instanceof Closure ? $response : Http::response($response, $status)]);
+    // null = the network fails with the token in the exception message.
+    Http::fake(['https://challenges.cloudflare.com/*' => $response === null
+        ? fn () => throw new ConnectionException('failed while sending response='.CANARY_TOKEN)
+        : Http::response($response, $status)]);
 
     $verdict = captcha()->verify(submission(humanInput([Fields::TOKEN => CANARY_TOKEN])), 'signup');
 
@@ -50,7 +53,7 @@ it('never logs a token value, on any refusal path', function (Closure|array $res
 })->with([
     'provider refused' => [['success' => false, 'error-codes' => ['invalid-input-response']], 200],
     'provider echoes the token in an error' => [['success' => false, 'error-codes' => [CANARY_TOKEN]], 200],
-    'network error naming the token' => [fn () => throw new ConnectionException('failed while sending response='.CANARY_TOKEN), 200],
+    'network error naming the token' => [null, 200],
     'http error' => [['token' => CANARY_TOKEN], 500],
     'hostname mismatch' => [['success' => true, 'hostname' => CANARY_TOKEN], 200],
     'action mismatch' => [['success' => true, 'hostname' => 'forms.example.test', 'action' => CANARY_TOKEN], 200],

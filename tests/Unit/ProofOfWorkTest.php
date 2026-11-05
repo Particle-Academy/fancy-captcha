@@ -7,7 +7,7 @@ use FancyCaptcha\Support\ProofOfWork;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 
-function pow(): ProofOfWork
+function powService(): ProofOfWork
 {
     return app(ProofOfWork::class);
 }
@@ -27,8 +27,8 @@ it('counts leading zero bits', function (string $hex, int $bits): void {
 it('issues a random, short-lived challenge with the configured difficulty', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 12, 'fancy-captcha.pow.ttl' => 120]);
 
-    $a = pow()->issue();
-    $b = pow()->issue();
+    $a = powService()->issue();
+    $b = powService()->issue();
 
     expect($a['id'])->toMatch('/^[A-Za-z0-9_-]{22}$/')
         ->and($a['id'])->not->toBe($b['id'])
@@ -39,54 +39,54 @@ it('issues a random, short-lived challenge with the configured difficulty', func
 
 it('accepts a correct solution once', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 8]);
-    $challenge = pow()->issue();
+    $challenge = powService()->issue();
 
-    expect(pow()->redeem(solvePow($challenge['id'], 8)))->toBeNull();
+    expect(powService()->redeem(solvePow($challenge['id'], 8)))->toBeNull();
 });
 
 it('never accepts the same challenge twice (replay)', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 8]);
-    $solution = solvePow(pow()->issue()['id'], 8);
+    $solution = solvePow(powService()->issue()['id'], 8);
 
-    expect(pow()->redeem($solution))->toBeNull()
-        ->and(pow()->redeem($solution))->not->toBeNull();
+    expect(powService()->redeem($solution))->toBeNull()
+        ->and(powService()->redeem($solution))->not->toBeNull();
 });
 
 it('refuses a second redemption even if the challenge entry were still readable (concurrent requests)', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 8]);
-    $challenge = pow()->issue();
+    $challenge = powService()->issue();
     // Another request already marked it spent between our read and our write.
     Cache::add('fancy-captcha:pow-spent:'.$challenge['id'], true, 300);
 
-    expect(pow()->redeem(solvePow($challenge['id'], 8)))->toBe('pow_replayed');
+    expect(powService()->redeem(solvePow($challenge['id'], 8)))->toBe('pow_replayed');
 });
 
 it('burns a challenge on a wrong answer, so it cannot be retried', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 8]);
-    $id = pow()->issue()['id'];
+    $id = powService()->issue()['id'];
 
-    expect(pow()->redeem(wrongPow($id, 8)))->toBe('pow_insufficient')
-        ->and(pow()->redeem(solvePow($id, 8)))->not->toBeNull();
+    expect(powService()->redeem(wrongPow($id, 8)))->toBe('pow_insufficient')
+        ->and(powService()->redeem(solvePow($id, 8)))->not->toBeNull();
 });
 
 it('refuses a solution for a challenge it never issued', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 8]);
 
-    expect(pow()->redeem(solvePow(str_repeat('A', 22), 8)))->toBe('pow_unknown');
+    expect(powService()->redeem(solvePow(str_repeat('A', 22), 8)))->toBe('pow_unknown');
 });
 
 it('expires a challenge after its ttl', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 8, 'fancy-captcha.pow.ttl' => 60]);
-    $solution = solvePow(pow()->issue()['id'], 8);
+    $solution = solvePow(powService()->issue()['id'], 8);
 
     Carbon::setTestNow(Carbon::now()->addSeconds(61));
 
-    expect(pow()->redeem($solution))->toBe('pow_unknown');
+    expect(powService()->redeem($solution))->toBe('pow_unknown');
 });
 
 it('uses the difficulty stored with the challenge, not the one in the request', function (): void {
     captchaApp(['fancy-captcha.pow.difficulty' => 16]);
-    $id = pow()->issue()['id'];
+    $id = powService()->issue()['id'];
 
     // A nonce good for 4 bits but not for 16.
     $weak = null;
@@ -97,13 +97,13 @@ it('uses the difficulty stored with the challenge, not the one in the request', 
         }
     }
 
-    expect(pow()->redeem($weak))->toBe('pow_insufficient');
+    expect(powService()->redeem($weak))->toBe('pow_insufficient');
 });
 
 it('rejects hostile shapes before touching the cache', function (mixed $input, string $reason): void {
     captchaApp();
 
-    expect(pow()->redeem($input))->toBe($reason);
+    expect(powService()->redeem($input))->toBe($reason);
 })->with([
     'missing' => [null, 'pow_missing'],
     'empty' => ['', 'pow_missing'],
@@ -121,5 +121,5 @@ it('rejects hostile shapes before touching the cache', function (mixed $input, s
 it('refuses a difficulty outside 8..32 bits', function (int $difficulty): void {
     captchaApp(['fancy-captcha.pow.difficulty' => $difficulty]);
 
-    pow()->issue();
+    powService()->issue();
 })->with([0, 7, 33, 256])->throws(InvalidCaptchaConfiguration::class);
