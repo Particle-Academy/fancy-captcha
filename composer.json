@@ -1,0 +1,71 @@
+{
+    "name": "particle-academy/fancy-captcha",
+    "description": "Bot protection for Laravel forms: a built-in honeypot, signed form timing and optional proof-of-work, plus Cloudflare Turnstile, reCAPTCHA and hCaptcha drivers over plain HTTP. Fails closed, logs reasons without tokens, and ships a fake for host tests.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "captcha", "bot-protection", "honeypot", "proof-of-work", "turnstile", "recaptcha", "hcaptcha", "spam", "fancy", "particle-academy"],
+    "homepage": "https://github.com/Particle-Academy/fancy-captcha",
+    "support": {
+        "issues": "https://github.com/Particle-Academy/fancy-captcha/issues",
+        "source": "https://github.com/Particle-Academy/fancy-captcha"
+    },
+    "authors": [
+        {
+            "name": "Particle Academy",
+            "homepage": "https://github.com/Particle-Academy"
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "ext-json": "*",
+        "illuminate/cache": "^13.0",
+        "illuminate/contracts": "^13.0",
+        "illuminate/http": "^13.0",
+        "illuminate/log": "^13.0",
+        "illuminate/routing": "^13.0",
+        "illuminate/support": "^13.0",
+        "illuminate/validation": "^13.0"
+    },
+    "require-dev": {
+        "laravel/framework": "^13.30",
+        "pestphp/pest": "^5.0"
+    },
+    "suggest": {
+        "inertiajs/inertia-laravel": "Shares the captcha props with every page as `fancyCaptcha`, so the UI renders without a fetch.",
+        "particle-academy/fancy-compliance": "Lets a third-party provider be gated behind a consent category, with the built-in checks as the fallback when it is refused."
+    },
+    "autoload": {
+        "psr-4": {
+            "FancyCaptcha\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "FancyCaptcha\\Tests\\": "tests/",
+            "Inertia\\": "tests/Stubs/Inertia/",
+            "FancyCompliance\\Contracts\\": "tests/Stubs/FancyCompliance/"
+        }
+    },
+    "scripts": {
+        "test": "pest",
+        "lint": "@php tests/lint.php"
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "FancyCaptcha\\CaptchaServiceProvider"
+            ],
+            "aliases": {
+                "Captcha": "FancyCaptcha\\Facades\\Captcha"
+            }
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
