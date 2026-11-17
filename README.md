@@ -19,6 +19,13 @@ composer require particle-academy/fancy-captcha
 php artisan vendor:publish --tag=fancy-captcha-config   # optional
 ```
 
+<!-- fancy-agents-note:start -->
+> **For agents.** Every Fancy package, this one included, is listed on the
+> Fancy MCP catalog server at `https://ui.particle.academy/mcp` (streamable HTTP, no API key;
+> MCP id `fancy-ui`), with install commands and docs. How an agent installs
+> and uses this package is in [AGENTS.md](https://github.com/Particle-Academy/fancy-captcha/blob/main/AGENTS.md).
+<!-- fancy-agents-note:end -->
+
 ## Protect a form
 
 The middleware verifies a POST before your controller runs:
@@ -174,12 +181,6 @@ Captcha::extend('friendly', fn ($app, array $config) => new FriendlyVerifier($co
 ```
 
 A driver implements `FancyCaptcha\Contracts\Verifier` and must fail closed.
-
-## Agents
-
-An agent may read whether a form is protected and what state it is in. It must never
-solve or submit a captcha for a person: that is the one thing the check exists to tell
-apart. Nothing in this package helps it do so.
 
 ## Licence
 

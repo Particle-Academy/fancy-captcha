@@ -1,54 +1,66 @@
-# fancy-captcha code map
+# Using particle-academy/fancy-captcha — guide for agents
 
-`FancyCaptcha\` is a PHP 8.4 library for Laravel 13: one `Verifier` contract with a built-in
-driver (honeypot, signed timing, proof-of-work) and Turnstile, reCAPTCHA and hCaptcha drivers
-over Laravel's HTTP client. Its UI is `@particle-academy/fancy-captcha-ui`; `props()` is the
-contract between them.
+How an agent installs and uses this package in a consumer app. What the package
+is, is in [README.md](./README.md). Notes for working ON this repo's code are in
+[CONTRIBUTING.md](./CONTRIBUTING.md).
 
-## Where things are
+## Install
 
-- `CaptchaManager` (singleton, facade `Captcha`): `verify`, `passes`, `props`, `fields`,
-  `issueChallenge`, `failureMessage`, `extend`, `fake`. Picks the driver per request
-  (config, then consent), runs the built-in checks in front of a provider, memoises the
-  verdict on `$request->attributes`, logs refusals.
-- `Drivers\BuiltinVerifier`: honeypot, then timestamp, then (if required) proof-of-work.
-- `Drivers\SiteverifyVerifier`: the shared provider call and every fail-closed branch.
-  `TurnstileVerifier`, `RecaptchaVerifier` (v3 score and action), `HcaptchaVerifier`
-  (sends `sitekey`, optional enterprise score).
-- `Support\FormTimestamp`: `<unix>.<base64url HMAC>`, key derived from APP_KEY.
-- `Support\ProofOfWork`: issue and redeem; `leadingZeroBits`.
-- `Fields`: default field names, mirrored by the UI's `CAPTCHA_FIELDS`.
-- `Rules\Captcha` (implicit rule), `Http\VerifyCaptcha` (alias `captcha:<action>`),
-  `Http\ChallengeController` (`GET {prefix}/challenge`, throttled by the `fancy-captcha`
-  limiter), `Testing\CaptchaFake`.
-- `CaptchaServiceProvider`: DEEP-merges the config defaults (a shallow merge drops nested
-  defaults such as a provider's `endpoint`), registers the route, alias, limiter and the
-  optional Inertia share.
+```bash
+composer require particle-academy/fancy-captcha
+php artisan vendor:publish --tag=fancy-captcha-config   # optional
+```
 
-## Invariants a change must keep
+- **Requires** PHP `^8.4` and Laravel `^13.0`.
+- **Optional:** `inertiajs/inertia-laravel` (shares the props with every page as
+  `fancyCaptcha`), `particle-academy/fancy-compliance` (gates a provider behind a
+  consent category).
+- **The UI** is a separate npm package, `@particle-academy/fancy-captcha-ui`.
 
-- **Fail closed.** In `SiteverifyVerifier::verify` every branch that is not a well-formed
-  `success === true` returns a refusal, including any `Throwable`.
-- **A keyless provider refuses everything in production**; elsewhere it falls back to the
-  built-in checks with a warning.
-- **A proof-of-work challenge is accepted once**: entry must exist, spent marker added with
-  atomic `add()`, entry forgotten, THEN the hash is checked.
-- **Nothing hostile reaches a regex.** Timestamp, solution and token are checked with
-  `strlen` / `strspn` / `hash_equals` after a length bound.
-- **Logs carry codes and numbers, never values.** No token, solution, timestamp, secret,
-  reported hostname or action; exceptions by class name; provider codes only of the shape
-  `[a-z0-9-]{1,64}`; IP only with `log.ip`.
-- **The visitor gets `failureMessage()` only.**
-- **Consent-refused (or fancy-compliance absent) means the built-in fallback**, with
-  proof-of-work unless `consent.fallback_pow` is false.
-- `props()` never contains a secret, and its shape changes only additively.
-- `fake()` throws in production.
+## Find it on the Fancy MCP server
 
-## Tests
+The catalog server is `https://ui.particle.academy/mcp` (streamable HTTP, no API
+key; MCP id `fancy-ui`). This package is the registry entry `fancy-captcha`; its UI
+is `fancy-captcha-ui`.
 
-Pest 5 on a hand-built kernel (`tests/Support/TestApp.php`, no testbench), the array cache.
-Provider tests use `tests/Fixtures/*.json` (hand-written from the published formats) with
-`Http::fake()` and `Http::preventStrayRequests()`. `tests/Stubs/` stands in for Inertia's
-facade and fancy-compliance's `ConsentGate` (autoload-dev only). Pest invokes closures found
-in a dataset, so datasets name a failure and the test builds the closure.
-`php tests/lint.php` lints every PHP file.
+| Need | Tool |
+|---|---|
+| Find a server-side package by capability | `search-backend-packages` (stack `php`) |
+| Exact install commands for a slug | `install-instructions` |
+| Is the app on current versions? | `check-versions` |
+
+## API essentials
+
+- **Protect a route:** middleware `captcha:<action>`, e.g.
+  `->middleware('captcha:signup')`.
+- **Or a validation rule:** `'captcha' => [new \FancyCaptcha\Rules\Captcha('signup')]`.
+- **Anywhere else:** `Captcha::verify($request, 'signup')->passed`.
+- Both raise one generic validation error under the `captcha` key
+  (`fancy-captcha.error_key`); the specific reason goes to the log only.
+- **Props for the UI:** automatic as `fancyCaptcha` with Inertia; otherwise pass
+  `Captcha::props()` to the view yourself. It never contains a secret.
+- **Driver:** `CAPTCHA_DRIVER` = `builtin` (default, no keys), `turnstile`,
+  `recaptcha` or `hcaptcha`, with that provider's `*_SITE_KEY` / `*_SECRET_KEY`.
+  `CAPTCHA_POW=true` turns on the built-in proof-of-work.
+- **Host tests:** `Captcha::fake()` (passes) or `Captcha::fake(passes: false)`, then
+  `assertVerified('signup')`, `assertNotVerified()`, `assertVerifiedCount(n)`.
+- **Custom driver:** `Captcha::extend('name', fn ($app, array $config) => ...)`,
+  implementing `FancyCaptcha\Contracts\Verifier`; it must fail closed.
+
+## Traps
+
+- **A missing provider key refuses every submission in production.** Local and
+  testing fall back to the built-in checks with a warning.
+- **Proof-of-work needs a cache store with an atomic `add()`** (redis, memcached,
+  database, dynamodb, array), not `file`.
+- **Rotating `APP_KEY` invalidates open forms** (the timestamp is signed with a key
+  derived from it).
+- **Field names come from the props.** Rename them in `fancy-captcha.fields`, never in
+  the UI alone.
+- **`Captcha::fake()` throws in production.**
+
+## Agents and the captcha itself
+
+An agent may read whether a form is protected and what state it is in. It must never
+solve or submit a captcha for a person: that is the one thing the check exists to tell
+apart. Nothing in this package helps it do so.
